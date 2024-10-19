@@ -5,6 +5,7 @@ const F1Field = require("ffjavascript").F1Field;
 const Scalar = require("ffjavascript").Scalar;
 const circomlibjs = require("circomlibjs");
 const snarkjs = require("snarkjs");
+const fs = require("fs");
 
 exports.p = Scalar.fromString(
   "21888242871839275222246405745257275088548364400416034343698204186575808495617"
@@ -95,5 +96,10 @@ describe("ZK Multisig Test ", function () {
 
     console.log("proof:", proof);
     console.log("pubSig:", publicSignals);
+    
+  const vKey = JSON.parse(fs.readFileSync("build/vkey.json"));
+  const res = await snarkjs.groth16.verify(vKey, publicSignals, proof);
+
+  console.log(res);
   });
 });
