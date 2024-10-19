@@ -80,8 +80,6 @@ describe("ZK Multisig Test ", function () {
     let address = generateEthereumAddress(pk);
     let addressDecimal = hexToDecimal(address);
     let addrDecPosHash = await poseidonHash([addressDecimal]);
-    console.log("address: ", address);
-    console.log("address decimal: ", addressDecimal);
     const { proof, publicSignals } = await snarkjs.groth16.fullProve(
       {
         privkey: decomposedPk,
