@@ -2,8 +2,12 @@
 pragma solidity ^0.8.26;
 
 import "./verifier.sol";
+import "hardhat/console.sol";
 
-contract MultiSigWallet is Groth16Verifier {
+contract MultiSigWallet {
+
+    Groth16Verifier verifier;
+
     event Deposit(address indexed sender, uint256 amount, uint256 balance);
     event SubmitTransaction(
         address indexed owner,
@@ -49,13 +53,19 @@ contract MultiSigWallet is Groth16Verifier {
         _;
     }
 
-    constructor(uint256[] memory _ownersHash, uint256 _numConfirmationsRequired) {
+    constructor(
+        uint256[] memory _ownersHash,
+        uint256 _numConfirmationsRequired,
+        address _verifier
+    ) {
         require(_ownersHash.length > 0, "owners required");
         require(
-            _numConfirmationsRequired > 0
-                && _numConfirmationsRequired <= _ownersHash.length,
+            _numConfirmationsRequired > 0 &&
+                _numConfirmationsRequired <= _ownersHash.length,
             "invalid number of required confirmations"
         );
+
+        verifier = Groth16Verifier(_verifier);
 
         for (uint256 i = 0; i < _ownersHash.length; i++) {
             uint256 ownerHash = _ownersHash[i];
@@ -73,12 +83,19 @@ contract MultiSigWallet is Groth16Verifier {
         emit Deposit(msg.sender, msg.value, address(this).balance);
     }
 
-    function submitTransaction(address _to, uint256 _value, bytes memory _data, uint[2] calldata _pA, uint[2][2] calldata _pB, uint[2] calldata _pC, uint[5] calldata _pubSignals)
-        public
-    {
+    function submitTransaction(
+        address _to,
+        uint256 _value,
+        bytes memory _data,
+        uint[2] calldata _pA,
+        uint[2][2] calldata _pB,
+        uint[2] calldata _pC,
+        uint[5] calldata _pubSignals
+    ) public {
         uint256 txIndex = transactions.length;
-
+        console.log("txIndex: %d", txIndex);
         uint256 msgHash = uint256(keccak256(abi.encode(_to, _value, _data)));
+        console.log("msgHash: %d", msgHash);
         verifyOwnership(msgHash, _pA, _pB, _pC, _pubSignals);
 
         transactions.push(
@@ -94,15 +111,20 @@ contract MultiSigWallet is Groth16Verifier {
         emit SubmitTransaction(msg.sender, txIndex, _to, _value, _data);
     }
 
-    function confirmTransaction(uint256 _txIndex, uint[2] calldata _pA, uint[2][2] calldata _pB, uint[2] calldata _pC, uint[5] calldata _pubSignals)
-        public
-        txExists(_txIndex)
-        notExecuted(_txIndex)
-        notConfirmed(_txIndex)
-    {
+    function confirmTransaction(
+        uint256 _txIndex,
+        uint[2] calldata _pA,
+        uint[2][2] calldata _pB,
+        uint[2] calldata _pC,
+        uint[5] calldata _pubSignals
+    ) public txExists(_txIndex) notExecuted(_txIndex) notConfirmed(_txIndex) {
         uint256 txIndex = transactions.length;
         Transaction storage transaction = transactions[_txIndex];
-        uint256 msgHash = uint256(keccak256(abi.encode(transaction.to, transaction.value, transaction.data)));
+        uint256 msgHash = uint256(
+            keccak256(
+                abi.encode(transaction.to, transaction.value, transaction.data)
+            )
+        );
         verifyOwnership(msgHash, _pA, _pB, _pC, _pubSignals);
         transaction.numConfirmations += 1;
         isConfirmed[_txIndex][msg.sender] = true;
@@ -110,11 +132,9 @@ contract MultiSigWallet is Groth16Verifier {
         emit ConfirmTransaction(msg.sender, _txIndex);
     }
 
-    function executeTransaction(uint256 _txIndex)
-        public
-        txExists(_txIndex)
-        notExecuted(_txIndex)
-    {
+    function executeTransaction(
+        uint256 _txIndex
+    ) public txExists(_txIndex) notExecuted(_txIndex) {
         Transaction storage transaction = transactions[_txIndex];
 
         require(
@@ -124,23 +144,30 @@ contract MultiSigWallet is Groth16Verifier {
 
         transaction.executed = true;
 
-        (bool success,) =
-            transaction.to.call{value: transaction.value}(transaction.data);
+        (bool success, ) = transaction.to.call{value: transaction.value}(
+            transaction.data
+        );
         require(success, "tx failed");
 
         emit ExecuteTransaction(msg.sender, _txIndex);
     }
 
-    function revokeConfirmation(uint256 _txIndex, uint[2] calldata _pA, uint[2][2] calldata _pB, uint[2] calldata _pC, uint[5] calldata _pubSignals)
-        public
-        txExists(_txIndex)
-        notExecuted(_txIndex)
-    {
+    function revokeConfirmation(
+        uint256 _txIndex,
+        uint[2] calldata _pA,
+        uint[2][2] calldata _pB,
+        uint[2] calldata _pC,
+        uint[5] calldata _pubSignals
+    ) public txExists(_txIndex) notExecuted(_txIndex) {
         Transaction storage transaction = transactions[_txIndex];
 
         uint256 txIndex = transactions.length;
 
-        uint256 msgHash = uint256(keccak256(abi.encode(transaction.to, transaction.value, transaction.data)));
+        uint256 msgHash = uint256(
+            keccak256(
+                abi.encode(transaction.to, transaction.value, transaction.data)
+            )
+        );
         verifyOwnership(msgHash, _pA, _pB, _pC, _pubSignals);
 
         require(isConfirmed[_txIndex][msg.sender], "tx not confirmed");
@@ -153,13 +180,42 @@ contract MultiSigWallet is Groth16Verifier {
 
     // pubSig[0] - msgAttestation
     // pubSig[1] - msgHash,
-    // 
-    function verifyOwnership(uint256 msgHash, uint256[2] calldata _pA, uint256[2][2] calldata _pB, uint256[2] calldata _pC, uint256[5] calldata _pubSignals) internal {
-      require(isAttested[_pubSignals[0]] == false, "Attestation already used");
-      require(msgHash == _pubSignals[1], "Invalid message signed");
-      require(isOwnerHash[_pubSignals[2]] || isOwnerHash[_pubSignals[3]] || isOwnerHash[_pubSignals[4]], "Invalid Address Signed the message");
-      require(verifyProof(_pA, _pB, _pC, _pubSignals), "Invalid Proof");
-      isAttested[_pubSignals[0]] = true;
+    //
+    function verifyOwnership(
+        uint256 msgHash,
+        uint256[2] memory _pA,
+        uint256[2][2] memory _pB,
+        uint256[2] memory _pC,
+        uint256[5] memory _pubSignals
+    ) public {
+        
+        require(!isAttested[_pubSignals[0]], "Attestation already used");
+        console.log("Verified Attestation");
+        require(msgHash == _pubSignals[1], "Invalid message signed");
+        console.log("Verified Message");
+        require(
+            isOwnerHash[_pubSignals[2]] &&
+                isOwnerHash[_pubSignals[3]] &&
+                isOwnerHash[_pubSignals[4]],
+            "Invalid Address Signed the message"
+        );
+        console.log("Verified Ownership");
+        bool isProofVerified = verifier.verifyProof(_pA, _pB, _pC, _pubSignals);
+        console.log("isverified:", isProofVerified);
+        require(isProofVerified, "Invalid Proof");
+        console.log("verified Proof");
+        // logUintArray("_pA", _pA);
+        // // console.log("_pB", _pB);
+        // logUintArray("_pC", _pC);
+        
+        isAttested[_pubSignals[0]] = true;
+    }
+
+    function logUintArray(string memory name, uint[2] memory array) public view {
+        console.log("Array", name, ":");
+        for (uint i = 0; i < array.length; i++) {
+            console.log("  [%d] = %d", i, array[i]);
+        }
     }
 
     function getOwnersHash() public view returns (uint256[] memory) {
@@ -170,7 +226,9 @@ contract MultiSigWallet is Groth16Verifier {
         return transactions.length;
     }
 
-    function getTransaction(uint256 _txIndex)
+    function getTransaction(
+        uint256 _txIndex
+    )
         public
         view
         returns (
