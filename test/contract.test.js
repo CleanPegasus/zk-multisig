@@ -72,8 +72,6 @@ async function main() {
     generateEthereumAddress(ownersPk[2]),
   ];
 
-  console.log("ownersPk: ", ownersPk);
-
   const ownersPoshash = await Promise.all(owners.map( async (owner) => {
     let ownerBigInt = BigInt(owner);
     return poseidonHash([ownerBigInt]);
@@ -84,7 +82,7 @@ async function main() {
   const multisig = await MultiSigWallet.deploy(
     ownersPoshash,
     requiredConfirmations,
-    verifier.target
+    // verifier.target
   );
 
   console.log("MultiSigWallet deployed to:", multisig.target);
@@ -97,51 +95,84 @@ async function main() {
     data: "0x",
   });
 
-  console.log("Transaction sent. Waiting for confirmation...");
   await tx.wait();
 
-  console.log(`Transaction confirmed. Hash: ${tx.hash}`);
+  console.log(`Send 1000 ether. Hash: ${tx.hash}`);
 
   // Create a tx from owner1 and send it via deployer
 
-  const to = owners[0];
-  const value = hre.ethers.parseEther("1");
-  const data = "0x";
+  let contractSuccessfulAttempts = 0;
+  let contractFailedAttempts = 0;
+  let verifierContractSuccessfulAttempts = 0;
+  let vkeySuccessfulAttempts = 0;
+  for (let i = 0; i < 3; i++) {
+    
+    const to = owners[0];
+    const value = hre.ethers.parseEther("1");
+    const data = "0x";
 
-  const msgHash = getSolidityKeccak256Hash(to, value, data);
-  let createdProof = await createProof(ownersDecomposedPk[0], msgHash, ownersPoshash[0], ownersPoshash[1], ownersPoshash[2]);
-  const [proof_0, publicSignals_0] = [createdProof.proof, createdProof.publicSignals];
+    const msgHash = getSolidityKeccak256Hash(to, value, data);
 
-  console.log("Proof: ", proof_0);
-  console.log("Public signals: ", publicSignals_0);
-  const calldata = await snarkjs.groth16.exportSolidityCallData(proof_0, publicSignals_0);
-  
-  const calldataList = JSON.parse("[" + calldata + "]");
-  console.log("Calldata: ", calldata);
+    try {
+      console.log("Generating Proof........")
+      let createdProof = await createProof(ownersDecomposedPk[0], msgHash, ownersPoshash[0], ownersPoshash[1], ownersPoshash[2]);
+      const [proof_0, publicSignals_0] = [createdProof.proof, createdProof.publicSignals];
 
-  const vKey = JSON.parse(fs.readFileSync("build/vkey.json"));
-  const res = await snarkjs.groth16.verify(vKey, publicSignals_0, proof_0);
+      const calldata = await snarkjs.groth16.exportSolidityCallData(proof_0, publicSignals_0);
+      
+      const calldataList = JSON.parse("[" + calldata + "]");
 
-  console.log("verification result: ", res);
 
-  const txHash = await multisig.submitTransaction(to, value, data, calldataList[0], calldataList[1], calldataList[2], calldataList[3]);
-  txReceipt = await txHash.wait();
-  console.log("Transaction confirmed. Hash: ", txReceipt.txHash);
+      const vKey = JSON.parse(fs.readFileSync("build/verificationKey.json"));
+      const res = await snarkjs.groth16.verify(vKey, publicSignals_0, proof_0);
+      if (res) {
+        vkeySuccessfulAttempts++;
+      }
+      const isVerifiedContract = await verifier.verifyProof(calldataList[0], calldataList[1], calldataList[2], calldataList[3]);
+      if (isVerifiedContract) {
+        verifierContractSuccessfulAttempts++;
+      }
+      const txHash = await multisig.submitTransaction(to, value, data, calldataList[0], calldataList[1], calldataList[2], calldataList[3]);
+      txReceipt = await txHash.wait();
+      if (txReceipt) {
+        contractSuccessfulAttempts++;
+      }
+      console.log("Transaction confirmed. Hash: ", txReceipt.hash);
+      console.log("++++++++++++++++++++++++++++++++++++++++++++++++++++")
+      console.log("Attempt: ", i);
+      console.log("Contract successful attempts: ", contractSuccessfulAttempts);
+      console.log("Contract failed attempts: ", contractFailedAttempts);
+      console.log("Verifier contract successful attempts: ", verifierContractSuccessfulAttempts);
+      console.log("Vkey successful attempts:", vkeySuccessfulAttempts);
+    } catch (error) {
+      console.log("Error: ", error);
+      contractFailedAttempts++;
+
+      console.log("++++++++++++++++++++++++++++++++++++++++++++++++++++")
+      console.log("Attempt: ", i);
+      console.log("Contract successful attempts: ", contractSuccessfulAttempts);
+      console.log("Contract failed attempts: ", contractFailedAttempts);
+      console.log("Verifier contract successful attempts: ", verifierContractSuccessfulAttempts);
+      console.log("Vkey successful attempts:", vkeySuccessfulAttempts);
+    }
+  }
+
 
   // see the stored tx
 
-  const storedTx = await multisig.transactions(0);
-  console.log("Stored tx: ", storedTx);
+  // const storedTx = await multisig.transactions(0);
+  // console.log("Stored tx: ", storedTx);
 
-  // // Create a tx from owner2 and send it via deployer
-
-  // console.log("ownersDecomposedPk[1]:", ownersDecomposedPk[1]);
+  // // // Create a tx from owner2 and send it via deployer
   // createdProof = await createProof(ownersDecomposedPk[1], msgHash, ownersPoshash[0], ownersPoshash[1], ownersPoshash[2]);
   // const [proof_1, publicSignals_1] = [createdProof.proof, createdProof.publicSignals];
+  // const calldata_1 = await snarkjs.groth16.exportSolidityCallData(proof_1, publicSignals_1);
+  // const calldataList_1 = JSON.parse("[" + calldata_1 + "]");
+
   // let tx_index = 0;
-  // const txHash_1 = await multisig.confirmTransaction(tx_index, getFirstTwoElements(proof_1.pi_a), getFirstTwoElements(proof_1.pi_b), getFirstTwoElements(proof_1.pi_c), publicSignals_1);
-  // txReceipt = await txHash_1.wait();
-  // console.log("Transaction confirmed. Hash: ", txReceipt.txHash);
+  // const tx_1 = await multisig.confirmTransaction(tx_index, calldataList_1[0], calldataList_1[1], calldataList_1[2], calldataList_1[3]);
+  // txReceipt = await tx_1.wait();
+  // console.log("Transaction confirmed. Hash: ", tx_1.transactionHash);
 
   // execute transaction
 

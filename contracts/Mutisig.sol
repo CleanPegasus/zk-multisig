@@ -4,9 +4,9 @@ pragma solidity ^0.8.26;
 import "./verifier.sol";
 import "hardhat/console.sol";
 
-contract MultiSigWallet {
+contract MultiSigWallet is Groth16Verifier {
 
-    Groth16Verifier verifier;
+    // Groth16Verifier verifier;
 
     event Deposit(address indexed sender, uint256 amount, uint256 balance);
     event SubmitTransaction(
@@ -55,8 +55,8 @@ contract MultiSigWallet {
 
     constructor(
         uint256[] memory _ownersHash,
-        uint256 _numConfirmationsRequired,
-        address _verifier
+        uint256 _numConfirmationsRequired
+        // address _verifier
     ) {
         require(_ownersHash.length > 0, "owners required");
         require(
@@ -65,7 +65,7 @@ contract MultiSigWallet {
             "invalid number of required confirmations"
         );
 
-        verifier = Groth16Verifier(_verifier);
+        // verifier = Groth16Verifier(_verifier);
 
         for (uint256 i = 0; i < _ownersHash.length; i++) {
             uint256 ownerHash = _ownersHash[i];
@@ -183,13 +183,13 @@ contract MultiSigWallet {
     //
     function verifyOwnership(
         uint256 msgHash,
-        uint256[2] memory _pA,
-        uint256[2][2] memory _pB,
-        uint256[2] memory _pC,
-        uint256[5] memory _pubSignals
+        uint256[2] calldata _pA,
+        uint256[2][2] calldata _pB,
+        uint256[2] calldata _pC,
+        uint256[5] calldata _pubSignals
     ) public {
         
-        require(!isAttested[_pubSignals[0]], "Attestation already used");
+        require(!isAttested[_pubSignals[0]], "Attestation already used"); // TODO: Add nonce to attestation
         console.log("Verified Attestation");
         require(msgHash == _pubSignals[1], "Invalid message signed");
         console.log("Verified Message");
@@ -200,13 +200,10 @@ contract MultiSigWallet {
             "Invalid Address Signed the message"
         );
         console.log("Verified Ownership");
-        bool isProofVerified = verifier.verifyProof(_pA, _pB, _pC, _pubSignals);
+        bool isProofVerified = verifyProof(_pA, _pB, _pC, _pubSignals);
         console.log("isverified:", isProofVerified);
         require(isProofVerified, "Invalid Proof");
         console.log("verified Proof");
-        // logUintArray("_pA", _pA);
-        // // console.log("_pB", _pB);
-        // logUintArray("_pC", _pC);
         
         isAttested[_pubSignals[0]] = true;
     }
